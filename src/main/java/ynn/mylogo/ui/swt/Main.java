@@ -6,9 +6,7 @@ public class Main
 {
 
 	/**
-	 * TODO: Doc. 
-	 *
-	 * @param args
+	 * @param args the arguments for the main method
 	 */
 	public static void main(String[] args)
 	{

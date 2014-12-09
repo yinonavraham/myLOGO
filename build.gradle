@@ -1,0 +1,246 @@
+import groovyx.net.http.EncoderRegistry
+import groovyx.net.http.HTTPBuilder
+import org.apache.http.HttpRequest
+import org.apache.http.HttpResponse
+import org.apache.http.auth.AuthScope
+import org.apache.http.auth.UsernamePasswordCredentials
+import org.apache.http.client.methods.HttpGet
+import org.apache.http.client.methods.HttpHead
+import org.apache.http.client.methods.HttpPut
+import org.apache.http.client.methods.HttpUriRequest
+import org.apache.http.entity.InputStreamEntity
+import org.apache.http.impl.client.DefaultHttpRequestRetryHandler
+import org.apache.http.impl.client.DefaultRedirectStrategy
+import org.apache.http.protocol.HttpContext
+import org.gradle.api.logging.Logger
+import org.gradle.api.logging.Logging
+import groovy.json.JsonBuilder
+import groovyx.net.http.HTTPBuilder
+import org.gradle.api.DefaultTask
+import org.gradle.api.GradleException
+import org.gradle.api.artifacts.Configuration
+import org.gradle.api.file.CopySpec
+import org.gradle.api.publish.Publication
+import org.gradle.api.publish.PublishingExtension
+import org.gradle.api.publish.maven.MavenPublication
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.Optional
+import org.gradle.api.tasks.TaskAction
+import org.gradle.api.tasks.Upload
+import java.text.DateFormat
+import java.text.ParseException
+import java.text.SimpleDateFormat
+
+import static groovyx.net.http.ContentType.BINARY
+import static groovyx.net.http.ContentType.JSON
+import static groovyx.net.http.Method.*
+
+apply plugin: 'java'
+apply plugin: 'maven'
+apply plugin: 'eclipse'
+apply plugin: 'application'
+
+sourceCompatibility = 1.6
+
+def swtArchitecture = 'win32.win32.x86_64'
+
+buildscript {
+	repositories {
+		jcenter()
+	}
+	dependencies {
+		classpath 'com.jfrog.bintray.gradle:gradle-bintray-plugin:1.0'
+	}
+}
+
+repositories {
+	jcenter()
+	maven {
+		url 'https://swt-repo.googlecode.com/svn/repo/'
+	}
+}
+dependencies {
+	compile group: 'org.eclipse.swt', name: "org.eclipse.swt.$swtArchitecture", version: '4.3'
+}
+
+apply plugin: 'com.jfrog.bintray'
+
+group = groupId
+version = versionId
+
+jar {
+	manifest {
+		attributes 'Specification-Title': jarTitle, 'Specification-Version': jarVersion, 'Specification-Vendor': jarVendor
+		attributes 'Implementation-Title': jarTitle, 'Implementation-Version': jarVersion, 'Implementation-Vendor': jarVendor 
+	}
+}
+
+task sourcesJar(type: Jar, dependsOn: classes) {
+	classifier = 'sources'
+	from sourceSets.main.allSource
+}
+
+task javadocJar(type: Jar, dependsOn: javadoc) {
+	classifier = 'javadoc'
+	from javadoc.destinationDir
+}
+
+artifacts {
+	archives sourcesJar
+	archives javadocJar
+}
+
+mainClassName = 'ynn.mylogo.ui.swt.Main'
+
+def groupPath = group.replaceAll('\\.', '/')
+
+bintray {
+	user = bintrayUser
+	key = bintrayApiKey
+
+	configurations = ['archives']
+//	filesSpec {
+//		from '/build/distributions'
+//		into groupPath + '/' + bintrayVersion
+//	}
+	dryRun = false //Whether to run this as dry-run, without deploying
+	publish = false //If version should be auto published after an upload
+	pkg {
+		repo = bintrayRepo
+		name = bintrayPackage
+		desc = 'myLOGO core - parser, design-time model, runtime model and basic UI'
+		websiteUrl = githubUrl
+		issueTrackerUrl = "${githubUrl}/issues"
+		vcsUrl = "${githubUrl}.git"
+		licenses = ['MIT']
+		labels = ['LOGO', 'parser']
+		publicDownloadNumbers = true
+		//Optional version descriptor
+		version {
+			name = bintrayVersion
+			vcsTag = "v${bintrayVersion}"
+		}
+	}
+}
+
+task uploadZipToBintray (dependsOn: 'distZip') << {
+	def apiUrl = 'https://api.bintray.com'
+	def dryRun = false
+	def zipName = "${artifactId}-${bintrayVersion}.zip"
+	def publishedZipName = "${artifactId}-${bintrayVersion}-${swtArchitecture}.zip"
+	def artifactPath = "$groupPath/$artifactId/$bintrayVersion/$publishedZipName"
+	def versionPath = "$bintrayPackage/$bintrayVersion"
+	def uploadUri = "/content/$bintrayUser/$bintrayRepo/$versionPath/${artifactPath}"
+	def artifactFile = file("build/distributions/$zipName")
+	if (!artifactFile.exists()) {
+		System.err.println "Skipping upload for missing file '$artifactFile'."
+		return
+	}
+	def http = BintrayHttpClientFactory.create(apiUrl, bintrayUser, bintrayApiKey) 
+	artifactFile.withInputStream { is ->
+		is.metaClass.totalBytes = {
+			artifactFile.length()
+		}
+		println "Uploading to $apiUrl$uploadUri..."
+		if (dryRun) {
+			println "(Dry run) Uploaded to '$apiUrl$uploadUri'."
+			return
+		}
+		http.request(PUT) {
+			uri.path = uploadUri
+			requestContentType = BINARY
+			body = is
+			response.success = { resp ->
+				println "Uploaded to '$apiUrl$uri.path'."
+			}
+			response.failure = { resp ->
+				throw new GradleException("Could not upload to '$apiUrl$uri.path': $resp.statusLine")
+			}
+		}
+	}
+}
+
+task pushToBintray (dependsOn: ['bintrayUpload', 'uploadZipToBintray']) {}
+
+
+
+
+
+
+class BintrayHttpClientFactory {
+	
+		private static Logger logger = Logging.getLogger(BintrayHttpClientFactory.class)
+	
+		static HTTPBuilder create(apiUrl, user, apiKey) {
+			def assertNotEmpty = { String name, String val ->
+				if (val?.isEmpty()) {
+					throw new IllegalArgumentException("Bintray $name cannot be empty!");
+				}
+			}
+			assertNotEmpty('apiUrl', apiUrl)
+			assertNotEmpty('user', user)
+			assertNotEmpty('apiKey', apiKey)
+	
+			def http = new HTTPBuilder(apiUrl)
+	
+			// Must use preemptive auth for non-repeatable upload requests
+			http.headers.Authorization = "Basic ${"$user:$apiKey".toString().bytes.encodeBase64()}"
+	
+			//Set an entity with a length for a stream that has the totalBytes method on it
+			def er = new EncoderRegistry() {
+				@Override
+				InputStreamEntity encodeStream(Object data, Object contentType) throws UnsupportedEncodingException {
+					if (data.metaClass.getMetaMethod("totalBytes")) {
+						InputStreamEntity entity = new InputStreamEntity((InputStream) data, data.totalBytes())
+						entity.setContentType(contentType.toString())
+						entity
+					} else {
+						super.encodeStream(data, contentType)
+					}
+				}
+			}
+			http.encoders = er
+	
+			//No point in retrying non-repeatable upload requests
+			http.client.httpRequestRetryHandler = new DefaultHttpRequestRetryHandler(0, false)
+	
+			//Follow permanent redirects for PUTs
+			http.client.setRedirectStrategy(new DefaultRedirectStrategy() {
+				@Override
+				boolean isRedirected(HttpRequest request, HttpResponse response, HttpContext context) {
+					def redirected = super.isRedirected(request, response, context)
+					return redirected || response.getStatusLine().getStatusCode() == 301
+				}
+	
+				@Override
+				HttpUriRequest getRedirect(HttpRequest request, HttpResponse response, HttpContext context)
+						throws org.apache.http.ProtocolException {
+					URI uri = getLocationURI(request, response, context)
+					String method = request.requestLine.method
+					if (method.equalsIgnoreCase(HttpHead.METHOD_NAME)) {
+						return new HttpHead(uri)
+					} else if (method.equalsIgnoreCase(HttpPut.METHOD_NAME)) {
+						return new HttpPut(uri)
+					} else {
+						return new HttpGet(uri)
+					}
+				}
+			})
+	
+			if (System.getProperty('http.proxyHost')) {
+				String proxyHost = System.getProperty('http.proxyHost')
+				Integer proxyPort = Integer.parseInt(System.getProperty('http.proxyPort', '80'));
+				String proxyUser = System.getProperty('http.proxyUser')
+				String proxyPassword = System.getProperty('http.proxyPassword', '')
+				logger.info "Using proxy ${proxyUser}:${proxyPassword}@${proxyHost}:${proxyPort}"
+				if (proxyUser) {
+					http.client.getCredentialsProvider().setCredentials(
+						new AuthScope(proxyHost, proxyPort),
+						new UsernamePasswordCredentials(proxyUser, proxyPassword)
+					)
+				}
+				http.setProxy(proxyHost, proxyPort, 'http')
+			}
+			http
+		}
+	}
