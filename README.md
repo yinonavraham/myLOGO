@@ -57,9 +57,9 @@ The `RuntimeActionsExecutor` is responsible for executing the runtime actions on
 ##Build Dependency
 This library is available in [Bintray.com](https://bintray.com/yinonavraham/maven/myLOGO-Core). 
 
-In order to have it in your dependencies, use the following maven repository url and artifact coordinates:
+In order to have it in your dependencies, use the following maven repository url (jcenter) and artifact coordinates:
 ```
-url:     http://dl.bintray.com/yinonavraham/maven/
+url:     http://jcenter.bintray.com/
 group:   ynn.mylogo
 name:    mylogo-core
 version: 1.0.1
