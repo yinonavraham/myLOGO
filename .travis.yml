@@ -3,4 +3,5 @@ language: java
 jdk:
   - openjdk6
 
-sudo: required
+before_install:
+ - chmod +x gradlew
