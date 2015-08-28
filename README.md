@@ -1,4 +1,5 @@
 [ ![Download](https://api.bintray.com/packages/yinonavraham/maven/myLOGO-Core/images/download.svg) ](https://bintray.com/yinonavraham/maven/myLOGO-Core/_latestVersion)
+[![Build Status](https://travis-ci.org/yinonavraham/myLOGO.svg)](https://travis-ci.org/yinonavraham/myLOGO)
 
 myLOGO
 ======
