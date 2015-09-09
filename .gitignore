@@ -2,6 +2,11 @@
 bin
 build
 .gradle
+.idea
+.settings
+.classpath
+.project
+*.iml
 
 # Mobile Tools for Java (J2ME)
 .mtj.tmp/
